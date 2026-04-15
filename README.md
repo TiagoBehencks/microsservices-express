@@ -5,102 +5,110 @@ A modern microservices architecture built with **Bun** + **Elysia.js**, featurin
 ## Architecture Overview
 
 ```
-                                    ┌─────────────────────────────────────────────────────────────┐
-                                    │                        INTERNET                              │
-                                    └─────────────────────────────┬───────────────────────────────┘
+                                        ┌─────────────────────────────────────────────────────────────┐
+                                        │                        INTERNET                             │
+                                        └─────────────────────────────┬───────────────────────────────┘
                                                                       │
                                                                       ▼
-                                    ┌─────────────────────────────────────────────────────────────┐
-                                    │                       API GATEWAY                             │
-                                    │                    (Port 3000 - HTTP)                         │
-                                    │                      Elysia.js                                │
-                                    └─────────────────────────────┬───────────────────────────────┘
+                                        ┌─────────────────────────────────────────────────────────────┐
+                                        │                       API GATEWAY                           │
+                                        │                    (Port 3000 - HTTP)                       │
+                                        │                      Elysia.js                              │
+                                        └─────────────────────────────┬───────────────────────────────┘
                                                                       │
                               ┌───────────────────────────────────────┼───────────────────────────────────────┐
                               │                                       │                                       │
-                              ▼                                       ▼                                       │
-              ┌───────────────────────────┐               ┌───────────────────────────┐                   │
-              │     PRODUCT SERVICE        │               │      ORDER SERVICE        │                   │
-              │       (Port 3001)          │    gRPC       │        (Port 3002)        │                   │
-              │         (gRPC: 4001)        │◄──────────────│                           │                   │
-              │         Elysia.js          │               │        Elysia.js         │                   │
-              │         Bun + Drizzle       │               │        Bun + Drizzle      │                   │
-              │         PostgreSQL          │               │        PostgreSQL         │                   │
-              └───────────────────────────┘               └────────────┬────────────────┘                   │
-                                                                      │                                        │
-                                                                      │ RabbitMQ                               │
-                                                                      │ (Port 5672)                            │
-                                                                      ▼                                        │
-                                    ┌───────────────────────────┐                                         │
-                                    │  NOTIFICATION SERVICE      │                                         │
-                                    │     (Port 3003)            │                                         │
-                                    │      Elysia.js            │                                         │
-                                    │      Bun + amqplib        │                                         │
-                                    └───────────────────────────┘                                         │
-                                                                      │                                        │
-                                                                      ▼                                        │
-                                    ┌───────────────────────────────────────────────────────────────────────┐
-                                    │                           MESSAGE BROKER                            │
-                                    │                         RabbitMQ (Port 5672)                          │
-                                    │                     RabbitMQ UI (Port 15672)                          │
-                                    └───────────────────────────────────────────────────────────────────────┘
-                                                                      │
-                                              ┌─────────────────────────┼─────────────────────────┐
-                                              │                         │                         │
-                                              ▼                         ▼                         │
-                              ┌───────────────────────────┐   ┌───────────────────────────┐          │
-                              │        POSTGRESQL        │   │      MESSAGE QUEUE         │          │
-                              │        (Port 5432)       │   │       (RabbitMQ)           │          │
-                              │                          │   │                           │          │
-                              │  • product-service DB    │   │  • order.created queue     │          │
-                              │  • order-service DB      │   │                           │          │
-                              └───────────────────────────┘   └───────────────────────────┘          │
+                              ▼                                       ▼                                       ▼
+              ┌───────────────────────────┐               ┌──────────────────────────┐              ┌──────────────────┐
+              │     PRODUCT SERVICE       │               │      ORDER SERVICE       │              │ (routes to       │
+              │       (Port 3001)         │     gRPC      │        (Port 3002)       │              │  services above) │
+              │         (gRPC: 4001)      │◄─────────────►│                          │              └──────────────────┘
+              │         Elysia.js         │               │        Elysia.js         │
+              │         Bun + Drizzle     │               │        Bun + Drizzle     │
+              │         PostgreSQL        │               │        PostgreSQL        │
+              └───────────────────────────┘               └────────────┬─────────────┘
+                                                                       │
+                                                                       │ Publish
+                                                                       │ order.created
+                                                                       ▼
+                                          ┌────────────────────────────────────────────────────┐
+                                          │                       MESSAGE BROKER               │
+                                          │                    RabbitMQ (Port 5672)            │
+                                          │                RabbitMQ UI (Port 15672)            │
+                                          │                  • order.created queue             │
+                                          └────────────┬──────────────────────────┬────────────┘
+                                                       │                          │
+                                                       │ Consume                  │ Other
+                                                       │ order.created            │ consumers
+                                                       ▼                          ▼
+                                  ┌───────────────────────────────────────────────────────────┐
+                                  │           NOTIFICATION SERVICE (Port 3003)                │
+                                  │                    Elysia.js                              │
+                                  │               Bun + amqplib                               │
+                                  │  • Consumes order.created events                          │
+                                  │  • Sends email confirmations                              │
+                                  └───────────────┬───────────────────────────────────────────┘
+                                                  │
+                                                  │ Reads/Writes
+                                                  ▼
+                                  ┌───────────────────────────────────────────────────────────┐
+                                  │                    POSTGRESQL                             │
+                                  │                   (Port 5432)                             │
+                                  │                                                           │
+                                  │  • product-service DB (products, inventory)               │
+                                  │  • order-service DB (orders)                              │
+                                  └───────────────────────────────────────────────────────────┘
 ```
 
 ## Services
 
 ### API Gateway
-| Property | Value |
-|----------|-------|
-| Port | 3000 |
-| Technology | Bun + Elysia.js |
-| Purpose | Single entry point for all client requests |
-| Responsibility | Route requests to appropriate services |
+
+| Property       | Value                                      |
+| -------------- | ------------------------------------------ |
+| Port           | 3000                                       |
+| Technology     | Bun + Elysia.js                            |
+| Purpose        | Single entry point for all client requests |
+| Responsibility | Route requests to appropriate services     |
 
 ### Product Service
-| Property | Value |
-|----------|-------|
-| HTTP Port | 3001 |
-| gRPC Port | 4001 |
-| Technology | Bun + Elysia.js + Drizzle ORM |
-| Database | PostgreSQL |
-| Purpose | Manage products and inventory |
+
+| Property         | Value                                    |
+| ---------------- | ---------------------------------------- |
+| HTTP Port        | 3001                                     |
+| gRPC Port        | 4001                                     |
+| Technology       | Bun + Elysia.js + Drizzle ORM            |
+| Database         | PostgreSQL                               |
+| Purpose          | Manage products and inventory            |
 | Responsibilities | CRUD products, check stock, reduce stock |
 
 ### Order Service
-| Property | Value |
-|----------|-------|
-| Port | 3002 |
-| Technology | Bun + Elysia.js + Drizzle ORM |
-| Database | PostgreSQL |
-| Purpose | Process and manage orders |
+
+| Property         | Value                               |
+| ---------------- | ----------------------------------- |
+| Port             | 3002                                |
+| Technology       | Bun + Elysia.js + Drizzle ORM       |
+| Database         | PostgreSQL                          |
+| Purpose          | Process and manage orders           |
 | Responsibilities | Create orders, publish order events |
 
 ### Notification Service
-| Property | Value |
-|----------|-------|
-| Port | 3003 |
-| Technology | Bun + Elysia.js + amqplib |
-| Purpose | Send notifications to customers |
+
+| Property         | Value                                          |
+| ---------------- | ---------------------------------------------- |
+| Port             | 3003                                           |
+| Technology       | Bun + Elysia.js + amqplib                      |
+| Purpose          | Send notifications to customers                |
 | Responsibilities | Consume order events, send email confirmations |
 
 ## Communication Patterns
 
 ### 1. HTTP (Synchronous)
+
 ```
 ┌─────────┐     HTTP      ┌─────────────────┐
-│  Client │ ───────────► │   API Gateway    │
-└─────────┘              │    (Elysia)      │
+│  Client │ ───────────►  │  API Gateway    │
+└─────────┘               │   (Elysia)      │
                           └────────┬────────┘
                                    │ HTTP
                           ┌────────▼────────┐
@@ -110,13 +118,14 @@ A modern microservices architecture built with **Bun** + **Elysia.js**, featurin
 ```
 
 ### 2. gRPC (Internal Service-to-Service)
+
 ```
 ┌─────────────────┐                    ┌─────────────────┐
-│  ORDER SERVICE  │                    │ PRODUCT SERVICE│
-│                 │     gRPC           │                │
-│  ┌───────────┐  │ ◄────────────────► │  ┌───────────┐ │
-│  │ gRPC Client│──┼────────────────────┼──│gRPC Server │ │
-│  └───────────┘  │                    │  └───────────┘ │
+│  ORDER SERVICE  │                    │ PRODUCT SERVICE │
+│                 │     gRPC           │                 │
+│  ┌───────────┐  │ ◄────────────────► │  ┌───────────┐  │
+│  │gRPC Client│──┼────────────────────┼──│gRPC Server│  │
+│  └───────────┘  │                    │  └───────────┘  │
 └─────────────────┘                    └─────────────────┘
 
 Services:
@@ -126,23 +135,25 @@ Services:
 ```
 
 ### 3. RabbitMQ (Event-Driven / Async)
+
 ```
-┌─────────────────┐     Publish      ┌───────────────┐     Consume     ┌───────────────────┐
-│  ORDER SERVICE  │ ──────────────► │  order.created │ ─────────────► │ NOTIFICATION SVC  │
+┌─────────────────┐     Publish      ┌────────────────┐     Consume    ┌───────────────────┐
+│  ORDER SERVICE  │ ──────────────►  │  order.created │ ─────────────► │ NOTIFICATION SVC  │
 │                 │   on new order   │    (Queue)     │                │                   │
-│                 │                  └───────────────┘                │  • Email confirm   │
-│                 │                                                      │  • Order alerts   │
-└─────────────────┘                                                      └───────────────────┘
+│                 │                  └────────────────┘                │  • Email confirm  │
+│                 │                                                    │  • Order alerts   │
+└─────────────────┘                                                    └───────────────────┘
 ```
 
 ## Flow Diagrams
 
 ### Create Order Flow
+
 ```
 ┌────────┐     POST /orders      ┌────────────┐      gRPC       ┌───────────┐
-│ Client │ ─────────────────────►│   API GW   │───────────────►│ Product   │
-└────────┘                       └─────┬──────┘  CheckStock    │ Service   │
-                                       │                      └───────────┘
+│ Client │ ─────────────────────►│   API GW   │───────────────► │ Product   │
+└────────┘                       └─────┬──────┘  CheckStock     │ Service   │
+                                       │                        └───────────┘
                                        │ HTTP
                                        ▼
                                ┌──────────────┐
@@ -170,38 +181,44 @@ Services:
 ## Technologies
 
 ### Runtime & Framework
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| **Bun** | 1.x | Fast JavaScript runtime |
-| **Elysia.js** | 1.x | Ergonomic HTTP framework |
+
+| Technology    | Version | Purpose                  |
+| ------------- | ------- | ------------------------ |
+| **Bun**       | 1.x     | Fast JavaScript runtime  |
+| **Elysia.js** | 1.x     | Ergonomic HTTP framework |
 
 ### Databases
-| Technology | Purpose |
-|------------|---------|
+
+| Technology     | Purpose                       |
+| -------------- | ----------------------------- |
 | **PostgreSQL** | Primary database for services |
 
 ### ORM
-| Technology | Purpose |
-|------------|---------|
+
+| Technology      | Purpose                    |
+| --------------- | -------------------------- |
 | **Drizzle ORM** | Type-safe database queries |
 
 ### Communication
-| Technology | Purpose |
-|------------|---------|
-| **gRPC** | Fast, typed internal service communication |
-| **RabbitMQ** | Message broker for async events |
-| **amqplib** | RabbitMQ client |
+
+| Technology   | Purpose                                    |
+| ------------ | ------------------------------------------ |
+| **gRPC**     | Fast, typed internal service communication |
+| **RabbitMQ** | Message broker for async events            |
+| **amqplib**  | RabbitMQ client                            |
 
 ### Infrastructure
-| Technology | Purpose |
-|------------|---------|
-| **Docker** | Containerization |
+
+| Technology         | Purpose                       |
+| ------------------ | ----------------------------- |
+| **Docker**         | Containerization              |
 | **Docker Compose** | Multi-container orchestration |
 
 ### Code Quality
-| Technology | Purpose |
-|------------|---------|
-| **TypeScript** | Type safety |
+
+| Technology           | Purpose                |
+| -------------------- | ---------------------- |
+| **TypeScript**       | Type safety            |
 | **Protocol Buffers** | gRPC schema definition |
 
 ## Prerequisites
@@ -253,36 +270,36 @@ docker compose up -d
 
 ### API Gateway (Port 3000)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| GET | `/products` | List all products |
-| GET | `/orders` | List all orders |
-| POST | `/orders` | Create new order |
+| Method | Endpoint    | Description       |
+| ------ | ----------- | ----------------- |
+| GET    | `/`         | Health check      |
+| GET    | `/products` | List all products |
+| GET    | `/orders`   | List all orders   |
+| POST   | `/orders`   | Create new order  |
 
 ### Product Service (Port 3001)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| GET | `/products` | List all products |
-| GET | `/products/:id` | Get product by ID |
-| POST | `/products` | Create product |
+| Method | Endpoint        | Description       |
+| ------ | --------------- | ----------------- |
+| GET    | `/`             | Health check      |
+| GET    | `/products`     | List all products |
+| GET    | `/products/:id` | Get product by ID |
+| POST   | `/products`     | Create product    |
 
 ### Order Service (Port 3002)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| GET | `/orders` | List all orders |
-| GET | `/orders/:id` | Get order by ID |
-| POST | `/orders` | Create order |
+| Method | Endpoint      | Description     |
+| ------ | ------------- | --------------- |
+| GET    | `/`           | Health check    |
+| GET    | `/orders`     | List all orders |
+| GET    | `/orders/:id` | Get order by ID |
+| POST   | `/orders`     | Create order    |
 
 ### Notification Service (Port 3003)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
+| Method | Endpoint | Description  |
+| ------ | -------- | ------------ |
+| GET    | `/`      | Health check |
 
 ## Testing the Flow
 
@@ -359,10 +376,12 @@ microsservices-elysia/
 ## Monitoring
 
 ### RabbitMQ Management UI
+
 - URL: http://localhost:15672
 - Credentials: `guest` / `guest`
 
 ### Health Checks
+
 ```bash
 curl http://localhost:3000  # API Gateway
 curl http://localhost:3001  # Product Service
