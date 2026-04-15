@@ -13,9 +13,27 @@ interface OrderCreatedEvent {
   createdAt: string;
 }
 
+async function connectWithRetry(retries = 10, delay = 3000): Promise<{ connection: Connection; channel: Channel }> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      console.log(`⏳ Attempting to connect to RabbitMQ... (${i + 1}/${retries})`);
+      const connection = await amqp.connect(RABBITMQ_URL);
+      const channel = await connection.createChannel();
+      console.log('📧 Connected to RabbitMQ!');
+      return { connection, channel };
+    } catch (err) {
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('Failed to connect to RabbitMQ');
+}
+
 export async function startConsumer(): Promise<void> {
-  const connection = await amqp.connect(RABBITMQ_URL);
-  const channel = await connection.createChannel();
+  const { connection, channel } = await connectWithRetry();
   
   await channel.assertQueue(ORDER_CREATED_QUEUE, { durable: true });
   await channel.prefetch(1);
