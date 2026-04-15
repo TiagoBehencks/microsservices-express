@@ -1,0 +1,83 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  product-service:
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile.product
+    container_name: product-service
+    ports:
+      - "3001:3001"
+      - "4001:4001"
+    env_file:
+      - product-service/.env
+    depends_on:
+      - postgres
+
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile.order
+    container_name: order-service
+    ports:
+      - "3002:3002"
+    env_file:
+      - order-service/.env
+    depends_on:
+      - rabbitmq
+      - product-service
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile.notification
+    container_name: notification-service
+    ports:
+      - "3003:3003"
+    env_file:
+      - notification-service/.env
+    depends_on:
+      - rabbitmq
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile.gateway
+    container_name: api-gateway
+    ports:
+      - "3000:3000"
+    env_file:
+      - api-gateway/.env
+    depends_on:
+      - product-service
+      - order-service
+
+volumes:
+  rabbitmq_data:
+  postgres_data:
