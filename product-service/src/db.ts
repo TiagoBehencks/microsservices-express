@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "../domain/entities";
+import * as schema from "./domain/entities";
 
 const DATABASE_URL = process.env.DATABASE_URL || "postgresql://ecommerce:ecommerce@postgres:5432/ecommerce";
 

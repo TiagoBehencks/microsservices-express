@@ -1,6 +1,6 @@
-import type { Product } from "../domain/mapper";
-import { toProduct } from "../domain/mapper";
-import type { ProductRepository } from "../application/ports/product-repository";
+import type { Product } from "../../domain/mapper";
+import { toProduct } from "../../domain/mapper";
+import type { ProductRepository } from "../ports/product-repository";
 
 export class GetProductUseCase {
   constructor(private productRepository: ProductRepository) {}
